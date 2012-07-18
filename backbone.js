@@ -343,7 +343,7 @@
     // If the server returns an attributes hash that differs, the model's
     // state will be `set` again.
     save: function(key, value, options) {
-      var attrs, current;
+      var attrs, current, done;
 
       // Handle both `("key", value)` and `({key: value})` -style calls.
       if (_.isObject(key) || key == null) {
@@ -367,16 +367,17 @@
         return false;
       }
 
+      // Do not persist invalid models.
+      if (!attrs && !this.isValid()) return false;
+
       // After a successful server-side save, the client is (optionally)
       // updated with the server-side state.
       var model = this;
       var success = options.success;
       options.success = function(resp, status, xhr) {
+        done = true;
         var serverAttrs = model.parse(resp, xhr);
-        if (options.wait) {
-          delete options.wait;
-          serverAttrs = _.extend(attrs || {}, serverAttrs);
-        }
+        if (options.wait) serverAttrs = _.extend(attrs || {}, serverAttrs);
         if (!model.set(serverAttrs, options)) return false;
         if (success) success(model, resp, options);
         model.trigger('sync', model, resp, options);
@@ -385,7 +386,14 @@
       // Finish configuring and sending the Ajax request.
       options.error = Backbone.wrapError(options.error, model, options);
       var xhr = this.sync(this.isNew() ? 'create' : 'update', this, options);
-      if (options.wait) this.clear(silentOptions).set(current, silentOptions);
+
+      // When using `wait`, reset attributes to original values unless
+      // `success` has been called already.
+      if (!done && options.wait) {
+        this.clear(silentOptions);
+        this.set(current, silentOptions);
+      }
+
       return xhr;
     },
 
@@ -616,7 +624,6 @@
       this.length += length;
       index = options.at != null ? options.at : this.models.length;
       splice.apply(this.models, [index, 0].concat(models));
-      if (this.comparator && options.at == null) this.sort({silent: true});
 
       // Merge in duplicate models.
       if (options.merge) {
@@ -626,6 +633,9 @@
           }
         }
       }
+
+      // Sort the collection if appropriate.
+      if (this.comparator && options.at == null) this.sort({silent: true});
 
       if (options.silent) return this;
       for (i = 0, length = this.models.length; i < length; i++) {
@@ -1192,13 +1202,6 @@
       return this;
     },
 
-    // **destroy** should clean up any references created by this view,
-    // preventing memory leaks.  The convention is for **destroy** to always
-    // return `this`.
-    destroy: function() {
-      return this;
-    },
-
     // Remove this view from the DOM. Note that the view isn't present in the
     // DOM by default, so calling this method may be a no-op.
     remove: function() {
@@ -1300,9 +1303,7 @@
 
   // The self-propagating extend function that Backbone classes use.
   var extend = function(protoProps, classProps) {
-    var child = inherits(this, protoProps, classProps);
-    child.extend = this.extend;
-    return child;
+    return inherits(this, protoProps, classProps);
   };
 
   // Set up inheritance for the model, collection, and view.
